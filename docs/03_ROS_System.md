@@ -629,7 +629,7 @@ Publishes the pose (position and orientation) of the lookahead point found by th
     </tr>
     <tr>
         <td><b>Handle</b></td>
-        <td><code>pub_cmd_vel_</code></td>
+        <td><code>pub_lookahead_</code></td>
     </tr>
     <tr>
         <td><b>Message Type</b></td>
