@@ -110,7 +110,7 @@ The guide to setup a GitHub repository can be ignored.
 2. On the terminal, install the following packages
     
     ```bash
-    sudo apt install ros-jazzy-turtlebot3-gazebo ros-jazzy-turtlebot3-teleop ros-jazzy-turtlebot3-cartographer ros-jazzy-nav2-map-server ros-jazzy-turtlebot3-navigation2 -y
+    sudo apt install ros-jazzy-turtlebot3-gazebo ros-jazzy-turtlebot3-teleop ros-jazzy-turtlebot3-cartographer ros-jazzy-nav2-map-server ros-jazzy-turtlebot3-navigation2 ros-jazzy-nav2-route -y
     ```
 
 3. Clone the GitHub repository:
