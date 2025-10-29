@@ -32,14 +32,32 @@ class Controller(Node):
 
         # Handles: Topic Subscribers
         # !TODO: path subscriber
-
+        self.sub_path_ = self.create_subscription(
+            Path,
+            "path",
+            self.callbackSubPath_,
+            10,
+        )
         # !TODO: odometry subscriber
-
+        self.sub_odom_ = self.create_subscription(
+            Odometry,
+            "odom",
+            self.callbackSubOdom_,
+            10,
+        )
         # Handles: Topic Publishers
         # !TODO: command velocities publisher
-
+        self.pub_cmd_vel_ = self.create_publisher(
+            TwistStamped, 
+            "cmd_vel", 
+            10
+        )
         # !TODO: lookahead point publisher
-        
+        self.pub_lookahead_ = self.create_publisher(
+            PoseStamped, 
+            "lookahead", 
+            10
+        )
         # Handles: Timers
         self.timer = self.create_timer(1.0 / self.frequency_, self.callbackTimer_)
 
@@ -64,9 +82,18 @@ class Controller(Node):
     def callbackSubOdom_(self, msg: Odometry):
         # !TODO: write robot pose to rbt_x_, rbt_y_, rbt_yaw_
         self.rbt_x_ = msg.pose.pose.position.x
+        self.rbt_y_ = msg.pose.pose.position.y
+        
+        #the robots pose is in quarternion space (crazy space)
+        q_w = msg.pose.pose.orientation.w
+        q_x = msg.pose.pose.orientation.x
+        q_y = msg.pose.pose.orientation.y
+        q_z = msg.pose.pose.orientation.z
 
-        q = msg.pose.pose.orientation
-        self.rbt_yaw_ = q.w
+        change_y = 2(q_w*q_z + q_x*q_y)
+        change_x = 1 -2(q_y**2 + q_z**2)
+        
+        self.rbt_yaw_ = atan2(change_y, change_x)
 
         self.received_odom_ = True
 
