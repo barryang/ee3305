@@ -137,7 +137,7 @@ class Behavior(Node):
         # !TODO: fill up the array containing the robot coordinates at [0] and goal coordinates at [1]
         msg_path_request.poses.append(rbt_pose)
         msg_path_request.poses.append(rbt_goal)
-
+        print("length of msg_path_request: "+str(len(msg_path_request.poses)))
         # publish the message
         self.get_logger().info(
             f"Sending Path Planning Request from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f}, {self.goal_y_:7.3f})"

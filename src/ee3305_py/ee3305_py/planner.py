@@ -82,7 +82,7 @@ class Planner(Node):
         # !TODO: write to rbt_x_, rbt_y_, goal_x_, goal_y_
         self.rbt_x_ = msg.poses[0].pose.position.x
         self.rbt_y_ = msg.poses[0].pose.position.y
-        self,goal_x_ = msg.poses[1].pose.position.x
+        self.goal_x_ = msg.poses[1].pose.position.x
         self.goal_y_ = msg.poses[1].pose.position.y
         self.has_new_request_ = True
 

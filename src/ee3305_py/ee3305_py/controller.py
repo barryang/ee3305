@@ -74,7 +74,7 @@ class Controller(Node):
             return  # do not update the path if no path is returned. This will ensure the copied path contains at least one point when the first non-empty path is received.
 
         # !TODO: copy the array from the path
-        self.path_poses_ = []
+        self.path_poses_ = msg.poses
 
         self.received_path_ = True
 
@@ -90,8 +90,8 @@ class Controller(Node):
         q_y = msg.pose.pose.orientation.y
         q_z = msg.pose.pose.orientation.z
 
-        change_y = 2(q_w*q_z + q_x*q_y)
-        change_x = 1 -2(q_y**2 + q_z**2)
+        change_y = 2 * (q_w*q_z + q_x*q_y)
+        change_x = 1 - 2*(q_y**2 + q_z**2)
         
         self.rbt_yaw_ = atan2(change_y, change_x)
 
@@ -118,7 +118,7 @@ class Controller(Node):
         msg_lookahead.pose.position.x = lookahead_x
         msg_lookahead.pose.position.y = lookahead_y
         self.pub_lookahead_.publish(msg_lookahead)
-
+        print("looking ahead")
         # Return the coordinates
         return lookahead_x, lookahead_y
 
