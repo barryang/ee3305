@@ -64,6 +64,8 @@ class Controller(Node):
         # Other Instance Variables
         self.received_odom_ = False
         self.received_path_ = False
+        self.path_count = 0
+        self.lookahead_found = False
 
     # Callbacks =============================================================
     
@@ -75,7 +77,7 @@ class Controller(Node):
 
         # !TODO: copy the array from the path
         self.path_poses_ = msg.poses
-
+        self.path_count = 0
         self.received_path_ = True
 
     # Odometry subscriber callback
@@ -101,15 +103,25 @@ class Controller(Node):
     # Make sure path and robot positions are already received, and the path contains at least one point.
     def getLookaheadPoint_(self):
         # Find the point along the path that is closest to the robot
-
-        # From the closest point, iterate towards the goal and find the first point that is at least a lookahead distance away.
-        # Return the goal point if no such lookahead point can be found
-        lookahead_idx = len(self.path_poses_) - 1
-
-        # Get the lookahead coordinates
-        lookahead_pose = self.path_poses_[lookahead_idx]
-        lookahead_x = lookahead_pose.pose.position.x
-        lookahead_y = lookahead_pose.pose.position.y
+        self.lookahead_found = False
+        for i, j in enumerate(self.path_poses_[self.path_count:]):
+            # assume point_x and point_y contains a point's coordinates
+            distance = hypot(j.pose.position.x - self.rbt_x_, j.pose.position.y - self.rbt_y_)
+            if distance > self.lookahead_distance_:
+                self.get_logger().info(f"distance: {distance:.3f}")
+                self.path_count = i
+                lookahead_x = j.pose.position.x
+                lookahead_y = j.pose.position.y
+                self.lookahead_found = True
+                break
+        if not self.lookahead_found:
+            # From the closest point, iterate towards the goal and find the first point that is at least a lookahead distance away.
+            # Return the goal point if no such lookahead point can be found
+            lookahead_idx = len(self.path_poses_) - 1
+            # Get the lookahead coordinates
+            lookahead_pose = self.path_poses_[lookahead_idx]
+            lookahead_x = lookahead_pose.pose.position.x
+            lookahead_y = lookahead_pose.pose.position.y
 
         # Publish the lookahead coordinates
         msg_lookahead = PoseStamped()
