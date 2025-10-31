@@ -1,5 +1,5 @@
 from heapq import heappush, heappop
-from math import hypot, floor, inf
+from math import hypot, floor, inf, sqrt
 
 import rclpy
 from rclpy.node import Node
@@ -73,13 +73,29 @@ class Planner(Node):
         # Other Instance Variables
         self.has_new_request_ = False
         self.received_map_ = False
+        # Initialize request and map-related fields to safe defaults
+        self.rbt_x_ = 0.0
+        self.rbt_y_ = 0.0
+        self.goal_x_ = 0.0
+        self.goal_y_ = 0.0
+        self.costmap_ = []  # flat list of int8 costs (row-major: index = r * cols + c)
+        self.costmap_resolution_ = 0.0
+        self.costmap_origin_x_ = 0.0
+        self.costmap_origin_y_ = 0.0
+        self.costmap_rows_ = 0
+        self.costmap_cols_ = 0
 
     # Callbacks =============================================================
 
     # Path request subscriber callback
-    def callbackSubPathRequest_(self, msg: Path):   
-        
-        # !TODO: write to rbt_x_, rbt_y_, goal_x_, goal_y_
+    def callbackSubPathRequest_(self, msg: Path):
+        """Receives a path request containing two poses: [0]=robot, [1]=goal.
+        Copies world coordinates into internal fields and flags a new request.
+        """
+        if len(msg.poses) < 2:
+            self.get_logger().warn("Path request must contain robot and goal poses; ignoring.")
+            return
+
         self.rbt_x_ = msg.poses[0].pose.position.x
         self.rbt_y_ = msg.poses[0].pose.position.y
         self.goal_x_ = msg.poses[1].pose.position.x
@@ -89,15 +105,23 @@ class Planner(Node):
     # Global costmap subscriber callback
     # This is only run once because the costmap is only published once, at the start of the launch.
     def callbackSubGlobalCostmap_(self, msg: OccupancyGrid):
-        
-        # !TODO: write to costmap_, costmap_resolution_, costmap_origin_x_, costmap_origin_y_, costmap_rows_, costmap_cols_
-        self.costmap_ = msg.header
-        self.costmap_resolution_ = msg.info.resolution
-        self.costmap_origin_x_ = msg.info.origin.position.x
-        self.costmap_origin_y_ = msg.info.origin.position.y
-        self.costmap_rows_ = msg.info.height
-        self.costmap_cols_ = msg.info.width
-        
+        """Latches the global costmap (inflated costs) and its metadata.
+        The costmap is a flat row-major array of int8 costs in [0..99].
+        """
+        # Copy data and metadata needed for grid conversions and planning
+        self.costmap_ = list(msg.data)
+        self.costmap_resolution_ = float(msg.info.resolution)
+        self.costmap_origin_x_ = float(msg.info.origin.position.x)
+        self.costmap_origin_y_ = float(msg.info.origin.position.y)
+        self.costmap_rows_ = int(msg.info.height)
+        self.costmap_cols_ = int(msg.info.width)
+
+        # Basic sanity check
+        expected_len = self.costmap_rows_ * self.costmap_cols_
+        if len(self.costmap_) != expected_len:
+            self.get_logger().warn(
+                f"Costmap size mismatch (data={len(self.costmap_)}, rows*cols={expected_len}).")
+
         self.received_map_ = True
 
     # runs the path planner at regular intervals as long as there is a new path request.
