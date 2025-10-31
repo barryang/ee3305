@@ -201,6 +201,8 @@ class Planner(Node):
         - Uses metric step costs (straight vs diagonal).
         - Reconstructs and publishes a nav_msgs/Path in map frame.
         """
+        # self.publishInterpolatedPath(start_x, start_y, goal_x, goal_y)
+        # return
         # Validate map availability
         if not self.received_map_ or self.costmap_cols_ <= 0 or self.costmap_rows_ <= 0:
             self.get_logger().warn("Planner called without a valid costmap; publishing empty path.")

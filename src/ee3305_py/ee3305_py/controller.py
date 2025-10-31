@@ -115,7 +115,7 @@ class Controller(Node):
         # other ways that use memoisation have assumptions that could maybe buggy
         for i, j in enumerate(self.path_poses_):
             distance = hypot(j.pose.position.x - self.rbt_x_, j.pose.position.y - self.rbt_y_)
-            if distance > closest_dist:
+            if distance < closest_dist:
                 closest_dist = distance
                 closest_point_x = j.pose.position.x
                 closest_point_y = j.pose.position.y 
@@ -124,7 +124,7 @@ class Controller(Node):
 
         print("got closest point:" +  str(closest_point_x) + ", " + str(closest_point_y) + "\n at index: " + str(closest_point_index))
 
-
+        self.lookahead_found = False
         for i, j in enumerate(self.path_poses_[closest_point_index:]):
             distance = hypot(j.pose.position.x - closest_point_x, j.pose.position.y - closest_point_y)
             if distance > self.lookahead_distance_:
