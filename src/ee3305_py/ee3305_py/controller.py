@@ -103,18 +103,41 @@ class Controller(Node):
     # Make sure path and robot positions are already received, and the path contains at least one point.
     def getLookaheadPoint_(self):
         # Find the point along the path that is closest to the robot
-        self.lookahead_found = False
-        for i, j in enumerate(self.path_poses_[self.path_count:]):
-            # assume point_x and point_y contains a point's coordinates
+        #assumes self.path_poses[0] is the first closes position
+
+        print("getting closest point")
+        closest_dist = 100000000000000
+        closest_point_x = 100000000000000
+        closest_point_y = 100000000000000
+        closest_point_index = 0
+        # might want to change to binary search, maybe buggy cos the array is sorted in steps in time not position
+        # maybe just chatgpt?
+        # other ways that use memoisation have assumptions that could maybe buggy
+        for i, j in enumerate(self.path_poses_):
             distance = hypot(j.pose.position.x - self.rbt_x_, j.pose.position.y - self.rbt_y_)
+            if distance > closest_dist:
+                closest_dist = distance
+                closest_point_x = j.pose.position.x
+                closest_point_y = j.pose.position.y 
+                closest_point_index = i
+        
+
+        print("got closest point:" +  str(closest_point_x) + ", " + str(closest_point_y) + "\n at index: " + str(closest_point_index))
+
+
+        for i, j in enumerate(self.path_poses_[closest_point_index:]):
+            distance = hypot(j.pose.position.x - closest_point_x, j.pose.position.y - closest_point_y)
             if distance > self.lookahead_distance_:
                 self.get_logger().info(f"distance: {distance:.3f}")
                 self.path_count = i
                 lookahead_x = j.pose.position.x
                 lookahead_y = j.pose.position.y
                 self.lookahead_found = True
+                print("lookahead found")
                 break
+
         if not self.lookahead_found:
+            print("lookahead not found")
             # From the closest point, iterate towards the goal and find the first point that is at least a lookahead distance away.
             # Return the goal point if no such lookahead point can be found
             lookahead_idx = len(self.path_poses_) - 1
@@ -122,6 +145,38 @@ class Controller(Node):
             lookahead_pose = self.path_poses_[lookahead_idx]
             lookahead_x = lookahead_pose.pose.position.x
             lookahead_y = lookahead_pose.pose.position.y
+            print("using goal position")
+            
+
+        #     # assume point_x and point_y contains a point's coordinates
+        #     distance = hypot(j.pose.position.x - self.rbt_x_, j.pose.position.y - self.rbt_y_)
+        #     if distance > self.lookahead_distance_:
+        #         self.get_logger().info(f"distance: {distance:.3f}")
+        #         self.path_count = i
+        #         lookahead_x = j.pose.position.x
+        #         lookahead_y = j.pose.position.y
+
+
+        ##tried to optimise for look up time
+        # self.lookahead_found = False
+        # for i, j in enumerate(self.path_poses_[self.path_count:]):
+        #     # assume point_x and point_y contains a point's coordinates
+        #     distance = hypot(j.pose.position.x - self.rbt_x_, j.pose.position.y - self.rbt_y_)
+        #     if distance > self.lookahead_distance_:
+        #         self.get_logger().info(f"distance: {distance:.3f}")
+        #         self.path_count = i
+        #         lookahead_x = j.pose.position.x
+        #         lookahead_y = j.pose.position.y
+        #         self.lookahead_found = True
+        #         break
+        # if not self.lookahead_found:
+        #     # From the closest point, iterate towards the goal and find the first point that is at least a lookahead distance away.
+        #     # Return the goal point if no such lookahead point can be found
+        #     lookahead_idx = len(self.path_poses_) - 1
+        #     # Get the lookahead coordinates
+        #     lookahead_pose = self.path_poses_[lookahead_idx]
+        #     lookahead_x = lookahead_pose.pose.position.x
+        #     lookahead_y = lookahead_pose.pose.position.y
 
         # Publish the lookahead coordinates
         msg_lookahead = PoseStamped()
@@ -143,17 +198,35 @@ class Controller(Node):
         lookahead_x, lookahead_y = self.getLookaheadPoint_()
 
         # get distance to lookahead point (not to be confused with lookahead_distance)
+        # assume point_x and point_y contains a point's coordinates
+        change_x = lookahead_x - self.rbt_x_
+        change_y = lookahead_y - self.rbt_y_
+        lookahead_point_distance = hypot(change_x, change_y)
+        
+        #robot frame x and y coordinates
+        x_rbt_frame =  change_x*cos(self.rbt_yaw_) + change_y*sin(self.rbt_yaw_)
+        y_rbt_frame = change_y*cos(self.rbt_yaw_) - change_x*sin(self.rbt_yaw_)
+        
+        movement_rbt = hypot(x_rbt_frame, y_rbt_frame)
 
         # stop the robot if close to the point.
-
+        if movement_rbt < self.stop_thres_:
+            lin_vel = 0.0
+            ang_vel = 0.0
+        else:
         # get curvature
-
+            c = 2*y_rbt_frame/(movement_rbt**2)
+            
         # calculate velocities
-
+            lin_vel = self.lookahead_lin_vel_
+            ang_vel = c*lin_vel
+            
         # saturate velocities. The following can result in the wrong curvature,
         # but only when the robot is travelling too fast (which should not occur if well tuned).
-        lin_vel = 0.0
-        ang_vel = 0.0 * lookahead_x * lookahead_y
+            if lin_vel > self.max_lin_vel_ :
+                lin_vel = self.max_lin_vel_
+            if ang_vel > self.max_ang_vel_:
+                ang_vel = ang_vel
 
         # publish velocities
         msg_cmd_vel = TwistStamped()
