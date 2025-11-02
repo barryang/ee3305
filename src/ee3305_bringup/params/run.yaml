@@ -11,6 +11,9 @@ controller:
     stop_thres: 0.1 # {double} [m]
     max_lin_vel: 0.2 # {double} [m/s]
     max_ang_vel: 2.0 # {double} [rad/s]
+    curvature_threshold: 2.0
+    proximity threshold: 2.0
+    lookahead_gain: 2.0
 
 planner:
   ros__parameters:

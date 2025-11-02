@@ -22,6 +22,13 @@ class Controller(Node):
         self.declare_parameter("max_lin_vel", float(0.2))
         self.declare_parameter("max_ang_vel", float(2.0))
 
+
+        # parameters: declase user
+
+        self.declare_parameter("curvature_threshold", float(2.0))
+        self.declare_parameter("proximity_threshold", float(2.0))
+        self.declare_parameter("lookahead_gain", float(2.0))
+
         # Parameters: Get Values
         self.frequency_ = self.get_parameter("frequency").value
         self.lookahead_distance_ = self.get_parameter("lookahead_distance").value
@@ -29,6 +36,14 @@ class Controller(Node):
         self.stop_thres_ = self.get_parameter("stop_thres").value
         self.max_lin_vel_ = self.get_parameter("max_lin_vel").value
         self.max_ang_vel_ = self.get_parameter("max_ang_vel").value
+
+
+        #parameters: get values user
+        self.curvature_threshold =  self.get_parameter("curvature_threshold").value
+        self.proximity_threshold = self.get_parameter("proximity_threshold").value
+        self.lookahead_gain = self.get_parameter("lookahead_gain").value
+
+
 
         # Handles: Topic Subscribers
         # !TODO: path subscriber
@@ -220,7 +235,27 @@ class Controller(Node):
         # calculate velocities
             lin_vel = self.lookahead_lin_vel_
             ang_vel = c*lin_vel
+        # curvature heuristic
+            if self.curvature_threshold < c:
+                v_c = lin_vel * self.curvature_threshold / c
+            else:
+                v_c = lin_vel
             
+        
+        # proximity heuristic
+            d_0 = self.get_min_obstacle_dist(self.rbt_x_, self.rbt_y_)
+            if d_0 < self.proximity_threshold:
+                v = v_c * d_0 / self.proximity_threshold
+            else:
+                v = v_c
+            
+            self.lookahead_lin_vel_ = v
+            
+        # vary lookahead
+            L_h = v * self.lookahead_gain
+
+            self.lookahead_distance_ = L_h
+
         # saturate velocities. The following can result in the wrong curvature,
         # but only when the robot is travelling too fast (which should not occur if well tuned).
             if lin_vel > self.max_lin_vel_ :
