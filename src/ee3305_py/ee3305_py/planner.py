@@ -7,9 +7,12 @@ from rclpy.qos import (
     QoSProfile,
     DurabilityPolicy,
     qos_profile_services_default,
+    qos_profile_sensor_data,
 )
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid, Path
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32
 
 
 class DijkstraNode:
@@ -60,11 +63,24 @@ class Planner(Node):
             self.callbackSubPathRequest_,
             10,
         )
+        # Laser scan subscriber
+        self.sub_scan_ = self.create_subscription(
+            LaserScan,
+            "scan",
+            self.callbackSubScan_,
+            qos_profile_sensor_data,
+        )
         # Handles: Publishers
         # !TODO: Path publisher
         self.pub_path_ = self.create_publisher(
             Path, 
             "path", 
+            10
+        )
+        # Closest obstacle distance publisher
+        self.pub_closest_obstacle_ = self.create_publisher(
+            Float32,
+            "closest_obstacle_distance",
             10
         )
         # Handles: Timers
@@ -73,6 +89,8 @@ class Planner(Node):
         # Other Instance Variables
         self.has_new_request_ = False
         self.received_map_ = False
+        self.received_scan_ = False
+        self.current_scan_ = None
         # Initialize request and map-related fields to safe defaults
         self.rbt_x_ = 0.0
         self.rbt_y_ = 0.0
@@ -124,8 +142,55 @@ class Planner(Node):
 
         self.received_map_ = True
 
+    # Laser scan subscriber callback
+    def callbackSubScan_(self, msg: LaserScan):
+        """Stores the latest laser scan for obstacle detection."""
+        self.current_scan_ = msg
+        self.received_scan_ = True
+
+    # Find the closest obstacle distance from laser scan
+    def getClosestObstacleDistance_(self):
+        """
+        Returns the distance to the closest obstacle detected by the laser scan.
+        Returns None if no valid scan data is available.
+        """
+        if not self.received_scan_ or self.current_scan_ is None:
+            return None
+        
+        scan = self.current_scan_
+        min_distance = inf
+        
+        # Iterate through all laser scan ranges
+        for range_val in scan.ranges:
+            # Filter out invalid readings
+            if (range_val < scan.range_min or 
+                range_val > scan.range_max or 
+                range_val == inf or
+                range_val != range_val):  # NaN check
+                continue
+            
+            # Update minimum distance if this reading is closer
+            if range_val < min_distance:
+                min_distance = range_val
+        
+        # Return None if no valid readings found, otherwise return minimum distance
+        return min_distance if min_distance != inf else None
+
     # runs the path planner at regular intervals as long as there is a new path request.
     def callbackTimer_(self):
+        # Publish closest obstacle distance (runs continuously regardless of path planning)
+        closest_obstacle_dist = self.getClosestObstacleDistance_()
+        if closest_obstacle_dist is not None:
+            msg_distance = Float32()
+            msg_distance.data = float(closest_obstacle_dist)
+            self.pub_closest_obstacle_.publish(msg_distance)
+        else:
+            # Publish -1.0 to indicate no valid data
+            msg_distance = Float32()
+            msg_distance.data = -1.0
+            self.pub_closest_obstacle_.publish(msg_distance)
+
+        # Run path planner if there's a new request
         if not self.received_map_ or not self.has_new_request_:
             return  # silently return if no new request or map is not received.
 
