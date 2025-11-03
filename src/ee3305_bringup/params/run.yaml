@@ -8,12 +8,12 @@ controller:
     frequency: 20.0 # {double} [Hz]
     lookahead_distance: 0.3 # {double} [m]
     lookahead_lin_vel: 0.2 # {double} [m/s]
-    stop_thres: 0.1 # {double} [m]
+    stop_thres: 0.01 # {double} [m]
     max_lin_vel: 0.2 # {double} [m/s]
     max_ang_vel: 2.0 # {double} [rad/s]
-    curvature_threshold: 2.0
-    proximity threshold: 2.0
-    lookahead_gain: 2.0
+    curvature_threshold: 1.3
+    proximity threshold: 0.5
+    lookahead_gain: 1.4
 
 planner:
   ros__parameters:

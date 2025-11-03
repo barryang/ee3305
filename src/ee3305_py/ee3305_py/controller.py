@@ -2,7 +2,7 @@ from math import hypot, atan2, inf, cos, sin
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data, qos_profile_services_default
+from rclpy.qos import qos_profile_sensor_data, qos_profile_services_default, qos_profile_sensor_data
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry, Path
 from sensor_msgs.msg import LaserScan
@@ -25,9 +25,9 @@ class Controller(Node):
 
         # parameters: declase user
 
-        self.declare_parameter("curvature_threshold", float(2.0))
-        self.declare_parameter("proximity_threshold", float(2.0))
-        self.declare_parameter("lookahead_gain", float(2.0))
+        self.declare_parameter("curvature_threshold", float(1.8))
+        self.declare_parameter("proximity_threshold", float(0.12))
+        self.declare_parameter("lookahead_gain", float(1.4))
 
         # Parameters: Get Values
         self.frequency_ = self.get_parameter("frequency").value
@@ -73,6 +73,13 @@ class Controller(Node):
             "lookahead", 
             10
         )
+        # Laser scan subscriber
+        self.sub_scan_ = self.create_subscription(
+            LaserScan,
+            "scan",
+            self.callbackSubScan_,
+            qos_profile_sensor_data,
+        )
         # Handles: Timers
         self.timer = self.create_timer(1.0 / self.frequency_, self.callbackTimer_)
 
@@ -81,6 +88,8 @@ class Controller(Node):
         self.received_path_ = False
         self.path_count = 0
         self.lookahead_found = False
+        self.received_scan_ = False
+        self.current_scan_ = None
 
     # Callbacks =============================================================
     
@@ -161,37 +170,6 @@ class Controller(Node):
             lookahead_x = lookahead_pose.pose.position.x
             lookahead_y = lookahead_pose.pose.position.y
             print("using goal position")
-            
-
-        #     # assume point_x and point_y contains a point's coordinates
-        #     distance = hypot(j.pose.position.x - self.rbt_x_, j.pose.position.y - self.rbt_y_)
-        #     if distance > self.lookahead_distance_:
-        #         self.get_logger().info(f"distance: {distance:.3f}")
-        #         self.path_count = i
-        #         lookahead_x = j.pose.position.x
-        #         lookahead_y = j.pose.position.y
-
-
-        ##tried to optimise for look up time
-        # self.lookahead_found = False
-        # for i, j in enumerate(self.path_poses_[self.path_count:]):
-        #     # assume point_x and point_y contains a point's coordinates
-        #     distance = hypot(j.pose.position.x - self.rbt_x_, j.pose.position.y - self.rbt_y_)
-        #     if distance > self.lookahead_distance_:
-        #         self.get_logger().info(f"distance: {distance:.3f}")
-        #         self.path_count = i
-        #         lookahead_x = j.pose.position.x
-        #         lookahead_y = j.pose.position.y
-        #         self.lookahead_found = True
-        #         break
-        # if not self.lookahead_found:
-        #     # From the closest point, iterate towards the goal and find the first point that is at least a lookahead distance away.
-        #     # Return the goal point if no such lookahead point can be found
-        #     lookahead_idx = len(self.path_poses_) - 1
-        #     # Get the lookahead coordinates
-        #     lookahead_pose = self.path_poses_[lookahead_idx]
-        #     lookahead_x = lookahead_pose.pose.position.x
-        #     lookahead_y = lookahead_pose.pose.position.y
 
         # Publish the lookahead coordinates
         msg_lookahead = PoseStamped()
@@ -204,6 +182,40 @@ class Controller(Node):
         # Return the coordinates
         return lookahead_x, lookahead_y
 
+     # Laser scan subscriber callback
+    def callbackSubScan_(self, msg: LaserScan):
+        """Stores the latest laser scan for obstacle detection."""
+        self.current_scan_ = msg
+        self.received_scan_ = True
+
+    # Find the closest obstacle distance from laser scan
+    def getClosestObstacleDistance_(self):
+        """
+        Returns the distance to the closest obstacle detected by the laser scan.
+        Returns None if no valid scan data is available.
+        """
+        if not self.received_scan_ or self.current_scan_ is None:
+            return None
+        
+        scan = self.current_scan_
+        min_distance = inf
+        
+        # Iterate through all laser scan ranges
+        for range_val in scan.ranges:
+            # Filter out invalid readings
+            if (range_val < scan.range_min or 
+                range_val > scan.range_max or 
+                range_val == inf or
+                range_val != range_val):  # NaN check
+                continue
+            
+            # Update minimum distance if this reading is closer
+            if range_val < min_distance:
+                min_distance = range_val
+        
+        # Return None if no valid readings found, otherwise return minimum distance
+        return min_distance if min_distance != inf else None
+    
     # Implement the pure pursuit controller here
     def callbackTimer_(self):
         if not self.received_odom_ or not self.received_path_:
@@ -228,6 +240,8 @@ class Controller(Node):
         if movement_rbt < self.stop_thres_:
             lin_vel = 0.0
             ang_vel = 0.0
+            print("lookahead distance: " + str(lookahead_point_distance))
+            print("robot is too close to the lookahead point")
         else:
         # get curvature
             c = 2*y_rbt_frame/(movement_rbt**2)
@@ -238,31 +252,42 @@ class Controller(Node):
         # curvature heuristic
             if self.curvature_threshold < c:
                 v_c = lin_vel * self.curvature_threshold / c
+                print("using curvature heuristic: " + str(v_c))
             else:
                 v_c = lin_vel
+                print("using normal linear velocity without curve heuristic")
             
         
         # proximity heuristic
-            d_0 = self.get_min_obstacle_dist(self.rbt_x_, self.rbt_y_)
-            if d_0 < self.proximity_threshold:
+            d_0 = self.getClosestObstacleDistance_()
+            print("closet_obstacle: " + str(d_0))
+            print("proximity_threshold: " + str(self.proximity_threshold))
+            if d_0 == None:
+                v = v_c
+                print("using normal linear velocity without prox")
+            elif d_0 < self.proximity_threshold:
                 v = v_c * d_0 / self.proximity_threshold
+                print("using proximity heuristic: " + str(v))
             else:
                 v = v_c
-            
-            self.lookahead_lin_vel_ = v
+                print("using normal linear velocity without prox")
             
         # vary lookahead
             L_h = v * self.lookahead_gain
 
             self.lookahead_distance_ = L_h
 
+
+            lin_vel = v
+            ang_vel = c*lin_vel
         # saturate velocities. The following can result in the wrong curvature,
         # but only when the robot is travelling too fast (which should not occur if well tuned).
             if lin_vel > self.max_lin_vel_ :
                 lin_vel = self.max_lin_vel_
             if ang_vel > self.max_ang_vel_:
                 ang_vel = ang_vel
-
+        print("linear velocity: " + str(lin_vel))
+        print("angular velocity: " + str(ang_vel))
         # publish velocities
         msg_cmd_vel = TwistStamped()
         msg_cmd_vel.header.stamp = self.get_clock().now().to_msg()
