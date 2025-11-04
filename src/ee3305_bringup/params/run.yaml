@@ -6,15 +6,21 @@ behavior:
 controller:
   ros__parameters:
     frequency: 20.0 # {double} [Hz]
-    lookahead_distance: 0.3 # {double} [m]
+    lookahead_distance: 0.4 # {double} [m] INCREASED for smoother continuous motion
     lookahead_lin_vel: 0.2 # {double} [m/s]
-    stop_thres: 0.01 # {double} [m]
+    stop_thres: 0.05 # {double} [m] INCREASED to prevent stopping at curves
     max_lin_vel: 0.2 # {double} [m/s]
-    max_ang_vel: 2.0 # {double} [rad/s]
-    curvature_threshold: 1.3
-    proximity threshold: 0.5
-    lookahead_gain: 1.4
+    max_ang_vel: 3.0 # {double} [rad/s] INCREASED for faster turning
+    curvature_threshold: 2.0 # {double} [1/m] INCREASED to allow sharper turns without stopping
+    proximity_threshold: 0.4 # {double} [m] DECREASED for better obstacle avoidance (more conservative)
+    lookahead_gain: 1.4 # {double} [] multiplier for adaptive lookahead
+    min_lookahead_distance: 0.2 # {double} [m] INCREASED minimum to prevent stopping
+    max_lookahead_distance: 1.0 # {double} [m] maximum lookahead distance
+    velocity_smoothing_factor: 0.7 # {double} [0-1] smoothing (higher = more smoothing)
+    obstacle_angle_range: 1.57 # {double} [rad] ±90 degrees for obstacle detection
 
 planner:
   ros__parameters:
     max_access_cost: 90 # {int} []
+    smooth_path: true # {bool} enable polynomial trajectory smoothing
+    spline_resolution: 0.05 # {double} [m] distance between smoothed path points

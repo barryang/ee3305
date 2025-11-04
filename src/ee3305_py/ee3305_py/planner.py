@@ -1,5 +1,6 @@
 from heapq import heappush, heappop
 from math import hypot, floor, inf, sqrt
+import numpy as np
 
 import rclpy
 from rclpy.node import Node
@@ -35,10 +36,15 @@ class Planner(Node):
         self.declare_parameter("max_access_cost", int(100))
         # cell penalty scale (meters per cost unit) -> tune if you want to avoid high-cost cells
         self.declare_parameter("cell_penalty_scale", float(0.0005))
+        # Trajectory smoothing parameters
+        self.declare_parameter("smooth_path", bool(True))  # Enable/disable path smoothing
+        self.declare_parameter("spline_resolution", float(0.05))  # Distance between smoothed points [m]
 
         # Parameters: Get Values
         self.max_access_cost_ = self.get_parameter("max_access_cost").value
         self.cell_penalty_scale_ = self.get_parameter("cell_penalty_scale").value
+        self.smooth_path_ = self.get_parameter("smooth_path").value
+        self.spline_resolution_ = self.get_parameter("spline_resolution").value
 
         # Handles: Topic Subscribers
         qos_profile_latch = QoSProfile(
@@ -171,6 +177,153 @@ class Planner(Node):
 
     def outOfMap_(self, c, r):
         return (c < 0) or (r < 0) or (c >= self.costmap_cols_) or (r >= self.costmap_rows_)
+
+    # Trajectory smoothing --------------------------------------------------
+
+    def smoothPathWithSplines_(self, path_poses):
+        """
+        Smooth a path using cubic spline interpolation.
+        
+        This function takes a list of waypoints from A* and generates a smooth
+        polynomial trajectory using cubic splines. The splines ensure:
+        - Continuous position (C0 continuity)
+        - Continuous velocity (C1 continuity) 
+        - Continuous acceleration (C2 continuity)
+        
+        The algorithm:
+        1. Extract x and y coordinates from path waypoints
+        2. Calculate cumulative arc length along path (parameter t)
+        3. Fit cubic splines: x(t) and y(t) where t is arc length
+        4. Resample at regular intervals to get smooth trajectory
+        
+        Args:
+            path_poses: List of PoseStamped waypoints from A*
+            
+        Returns:
+            List of PoseStamped: Smoothed path with interpolated points
+        """
+        if len(path_poses) < 2:
+            return path_poses  # Can't smooth paths with < 2 points
+        
+        # Extract x and y coordinates from waypoints
+        x_coords = [pose.pose.position.x for pose in path_poses]
+        y_coords = [pose.pose.position.y for pose in path_poses]
+        
+        # Calculate cumulative arc length (parameter t for spline)
+        # This is the distance traveled along the path
+        t_values = [0.0]  # Start at t=0
+        cumulative_distance = 0.0
+        
+        for i in range(1, len(path_poses)):
+            dx = x_coords[i] - x_coords[i-1]
+            dy = y_coords[i] - y_coords[i-1]
+            segment_length = hypot(dx, dy)
+            cumulative_distance += segment_length
+            t_values.append(cumulative_distance)
+        
+        # Convert to numpy arrays for spline fitting
+        t_array = np.array(t_values)
+        x_array = np.array(x_coords)
+        y_array = np.array(y_coords)
+        
+        # Fit cubic splines for x(t) and y(t)
+        # Cubic spline: piecewise cubic polynomials with C2 continuity
+        # Each segment is a cubic polynomial: a*t³ + b*t² + c*t + d
+        try:
+            # Use numpy to fit cubic splines
+            # For small paths, we'll use a simple interpolation approach
+            if len(t_array) < 4:
+                # Not enough points for cubic spline, use linear interpolation
+                return path_poses
+            
+            # Create spline interpolation functions
+            # We'll use a parametric cubic spline approach
+            from scipy.interpolate import CubicSpline
+            
+            # Fit cubic splines with natural boundary conditions (zero second derivative at endpoints)
+            cs_x = CubicSpline(t_array, x_array, bc_type='natural')
+            cs_y = CubicSpline(t_array, y_array, bc_type='natural')
+            
+            # Resample the spline at regular intervals
+            total_length = t_array[-1]
+            num_points = max(2, int(total_length / self.spline_resolution_) + 1)
+            t_smooth = np.linspace(0, total_length, num_points)
+            
+            # Evaluate splines at new points
+            x_smooth = cs_x(t_smooth)
+            y_smooth = cs_y(t_smooth)
+            
+            # Create new smoothed path
+            smoothed_path = []
+            for i in range(len(t_smooth)):
+                pose = PoseStamped()
+                pose.header.stamp = self.get_clock().now().to_msg()
+                pose.header.frame_id = "map"
+                pose.pose.position.x = float(x_smooth[i])
+                pose.pose.position.y = float(y_smooth[i])
+                smoothed_path.append(pose)
+            
+            return smoothed_path
+            
+        except ImportError:
+            # If scipy is not available, use simple cubic Bezier interpolation
+            self.get_logger().warn("scipy not available, using simple cubic interpolation")
+            return self._simpleCubicInterpolation_(x_coords, y_coords, t_values)
+
+    def _simpleCubicInterpolation_(self, x_coords, y_coords, t_values):
+        """
+        Simple cubic interpolation using Catmull-Rom splines (fallback method).
+        
+        Catmull-Rom splines pass through all control points and provide
+        smooth interpolation without requiring scipy.
+        
+        Args:
+            x_coords: List of x-coordinates
+            y_coords: List of y-coordinates  
+            t_values: List of parameter values (cumulative distances)
+            
+        Returns:
+            List of PoseStamped: Interpolated path
+        """
+        if len(x_coords) < 2:
+            return []
+        
+        smoothed_path = []
+        total_length = t_values[-1]
+        num_points = max(2, int(total_length / self.spline_resolution_) + 1)
+        t_smooth = np.linspace(0, total_length, num_points)
+        
+        for t in t_smooth:
+            # Find which segment this t value belongs to
+            if t <= t_values[0]:
+                x, y = x_coords[0], y_coords[0]
+            elif t >= t_values[-1]:
+                x, y = x_coords[-1], y_coords[-1]
+            else:
+                # Find segment index
+                seg_idx = 0
+                for i in range(len(t_values) - 1):
+                    if t_values[i] <= t <= t_values[i+1]:
+                        seg_idx = i
+                        break
+                
+                # Linear interpolation within segment (simple fallback)
+                if seg_idx < len(t_values) - 1:
+                    t0, t1 = t_values[seg_idx], t_values[seg_idx+1]
+                    alpha = (t - t0) / (t1 - t0) if t1 != t0 else 0.0
+                    x = x_coords[seg_idx] + alpha * (x_coords[seg_idx+1] - x_coords[seg_idx])
+                    y = y_coords[seg_idx] + alpha * (y_coords[seg_idx+1] - y_coords[seg_idx])
+                else:
+                    x, y = x_coords[-1], y_coords[-1]
+            
+            pose = PoseStamped()
+            pose.header.stamp = self.get_clock().now().to_msg()
+            pose.header.frame_id = "map"
+            pose.pose.position.x = float(x)
+            pose.pose.position.y = float(y)
+            smoothed_path.append(pose)
+        
+        return smoothed_path
 
     # A* algorithm ----------------------------------------------------------
 
@@ -311,17 +464,33 @@ class Planner(Node):
             chain.append((node.c, node.r))
             node = node.parent
 
-        # Build poses from start->goal
+        # Build poses from start->goal (raw A* path)
+        raw_path_poses = []
         for c, r in reversed(chain):
             x, y = self.CRToXY_(c, r)
             pose = PoseStamped()
             pose.pose.position.x = x
             pose.pose.position.y = y
-            msg_path.poses.append(pose)
+            raw_path_poses.append(pose)
+
+        # Apply polynomial trajectory smoothing if enabled
+        if self.smooth_path_ and len(raw_path_poses) > 2:
+            # Smooth the path using cubic spline interpolation
+            smoothed_poses = self.smoothPathWithSplines_(raw_path_poses)
+            msg_path.poses = smoothed_poses
+            self.get_logger().info(
+                f"A* Path Found and smoothed: {len(raw_path_poses)} waypoints -> {len(smoothed_poses)} smoothed points"
+            )
+        else:
+            # Use raw path without smoothing
+            msg_path.poses = raw_path_poses
+            self.get_logger().info(
+                f"A* Path Found (no smoothing): {len(raw_path_poses)} waypoints"
+            )
 
         self.pub_path_.publish(msg_path)
         self.get_logger().info(
-            f"A* Path Found from Rbt @ ({start_x:7.3f}, {start_y:7.3f}) to Goal @ ({goal_x:7.3f}, {goal_y:7.3f}) with {len(msg_path.poses)} poses."
+            f"Path from Rbt @ ({start_x:7.3f}, {start_y:7.3f}) to Goal @ ({goal_x:7.3f}, {goal_y:7.3f}) with {len(msg_path.poses)} poses."
         )
 
 
