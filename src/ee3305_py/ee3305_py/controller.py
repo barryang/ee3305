@@ -396,22 +396,33 @@ class Controller(Node):
         # This is the same in any frame, but we use robot frame for calculations
         movement_rbt = hypot(x_rbt_frame, y_rbt_frame)  # L = distance to lookahead [m]
         
-        # ========== IMPROVEMENT: Backward Goal Detection ==========
-        # Problem: When goal is behind robot, Pure Pursuit would make robot go forward
-        # and make a large arc turn, which is inefficient and can cause collisions.
+        # ========== IMPROVEMENT: Alignment Check Before Moving ==========
+        # Problem: Robot moves forward while turning, causing path deviation and collisions.
         #
-        # Solution: Detect when goal is behind robot and turn in place first.
+        # Solution: Require robot to be 90% aligned (facing) the lookahead point before moving forward.
         #
         # How it works:
-        # - x_rbt_frame is the forward component of the lookahead point in robot frame
-        # - If x_rbt_frame < 0, the point is behind the robot
-        # - We use a threshold of -0.15m to avoid false positives from slight angles
-        # - When goal is detected behind, we enter "turn in place" mode (see below)
+        # - Calculate angle between robot heading and direction to lookahead point
+        # - Check alignment: cos(angle_error) > 0.9 means angle_error < ~26° (90% aligned)
+        # - If not aligned, turn in place first; only move forward when aligned
         #
-        # Why this threshold: -0.15m gives a small tolerance for goals that are slightly
-        # to the side but not directly behind, preventing unnecessary turning.
-        goal_behind_threshold = -0.15  # If x_rbt_frame < -0.15m, goal is behind [m]
-        goal_behind = x_rbt_frame < goal_behind_threshold
+        # Why 90% alignment: cos(26°) ≈ 0.9, meaning robot is facing within 26° of lookahead point
+        # This prevents forward motion while turning, reducing path deviation
+        angle_to_lookahead = atan2(change_y, change_x)  # Angle to lookahead in world frame
+        angle_error = angle_to_lookahead - self.rbt_yaw_  # Angle difference
+        
+        # Normalize angle error to [-π, π] range
+        while angle_error > 3.14159:
+            angle_error -= 2 * 3.14159
+        while angle_error < -3.14159:
+            angle_error += 2 * 3.14159
+        
+        # 90% alignment check: cos(angle_error) > 0.9 means angle_error < ~0.45 rad (26°)
+        alignment_threshold = 0.45  # ~26 degrees for 90% alignment (cos(26°) ≈ 0.9)
+        is_aligned = abs(angle_error) < alignment_threshold
+        
+        # Also check if lookahead is behind robot (x_rbt_frame < 0)
+        goal_behind = x_rbt_frame < 0.0
 
         # ========== Step 3: Check if Robot Should Stop ==========
         # Stop the robot only if:
@@ -484,45 +495,28 @@ class Controller(Node):
                 # No lateral clearance, fully stop (no turning)
                 ang_vel = 0.0
             print("EMERGENCY STOP: obstacle too close")
-        elif goal_behind:
-            # ========== IMPROVEMENT: Turn in Place for Backward Goals ==========
-            # Problem: When goal is behind robot, Pure Pursuit would make robot go forward
-            # and arc around, causing inefficient paths and potential collisions.
+        elif not is_aligned:
+            # ========== IMPROVEMENT: Turn to Face Lookahead Point Before Moving ==========
+            # Problem: Robot moves forward while turning, causing path deviation and collisions.
             #
-            # Solution: Turn in place first until robot faces the goal, then proceed normally.
+            # Solution: Turn in place until robot is 90% aligned (facing) the lookahead point,
+            # then allow forward motion. This prevents forward movement while turning.
             #
             # How it works:
-            # 1. Calculate angle to goal: angle_to_goal = atan2(dy, dx) in world frame
-            # 2. Calculate angle error: difference between goal angle and robot heading
-            # 3. Normalize angle error: wrap to [-π, π] range (shortest rotation)
-            # 4. Turn in place: lin_vel = 0, ang_vel proportional to angle error
-            # 5. Proportional control: Reduce angular velocity when close to target angle
+            # 1. angle_error is already calculated above (difference between lookahead direction and robot heading)
+            # 2. If not aligned (angle_error > alignment_threshold), turn in place
+            # 3. Turn in place: lin_vel = 0, ang_vel proportional to angle error
+            # 4. Proportional control: Reduce angular velocity when close to target angle
             #
-            # Why normalize angle: Angles can be > π or < -π. Normalizing ensures we
-            # always take the shortest rotation path (e.g., -179° instead of +181°).
+            # Why 90% alignment: cos(26°) ≈ 0.9, meaning robot faces within 26° of lookahead point.
+            # This ensures robot is mostly facing the correct direction before moving forward.
             #
-            # Why proportional control: When angle_error < 0.3 rad (~17°), we reduce
+            # Why proportional control: When angle_error < 0.5 rad (~29°), we reduce
             # angular velocity proportionally. This prevents overshooting and provides
             # smooth convergence to the target angle.
-            #
-            # Why 80% max_ang_vel: Using 80% (0.8) provides fast turning while leaving
-            # margin for fine control. This is faster than normal Pure Pursuit turns.
-            
-            # Calculate angle to goal in world frame
-            angle_to_goal = atan2(change_y, change_x)
-            
-            # Calculate angle error (difference between goal direction and robot heading)
-            angle_error = angle_to_goal - self.rbt_yaw_
-            
-            # Normalize angle error to [-π, π] range (find shortest rotation)
-            # This ensures we always rotate the shortest distance to face the goal
-            while angle_error > 3.14159:
-                angle_error -= 2 * 3.14159
-            while angle_error < -3.14159:
-                angle_error += 2 * 3.14159
             
             # Turn in place: no forward motion, only rotation
-            lin_vel = 0.0  # No forward motion
+            lin_vel = 0.0  # No forward motion until aligned
             
             # Set angular velocity based on angle error direction
             # Use 80% of max_ang_vel for fast turning (faster than normal Pure Pursuit)
@@ -533,11 +527,11 @@ class Controller(Node):
             
             # Proportional control: reduce angular velocity when close to target angle
             # This prevents overshooting and provides smooth convergence
-            if abs(angle_error) < 0.3:  # Within ~17 degrees (0.3 rad)
+            if abs(angle_error) < 0.5:  # Within ~29 degrees (0.5 rad)
                 # Scale angular velocity proportionally to remaining angle
                 # When angle_error → 0, ang_vel → 0 (smooth stop)
-                ang_vel *= abs(angle_error) / 0.3  # Proportional reduction
-            print(f"Goal behind robot: turning in place, angle_error={angle_error:.3f} rad")
+                ang_vel *= abs(angle_error) / 0.5  # Proportional reduction
+            print(f"Not aligned with lookahead: turning in place, angle_error={angle_error:.3f} rad ({abs(angle_error)*180/3.14159:.1f}°)")
         elif movement_rbt < self.stop_thres_ * 0.5 and not near_goal:
             # If very close to lookahead but not at goal, just reduce velocity slightly
             # Don't stop completely - this allows continuous motion through curves
