@@ -43,7 +43,7 @@ class Planner(Node):
         self.declare_parameter("smooth_path", bool(True))  # Enable/disable path smoothing
         self.declare_parameter("spline_resolution", float(0.05))  # Distance between smoothed points [m]
         # Obstacle avoidance parameters
-        self.declare_parameter("use_laser_obstacles", bool(False))  # Enable/disable laser-based obstacle avoidance
+        self.declare_parameter("use_laser_obstacles", bool(True))  # Enable/disable laser-based obstacle avoidance
         self.declare_parameter("obstacle_inflation_radius", float(0.2))  # Inflate obstacles by this radius [m]
         self.declare_parameter("replan_threshold", float(0.2))  # Replan if obstacle within this distance of path [m]
         self.declare_parameter("replan_frequency", float(20.0))  # Maximum replanning frequency [Hz]
