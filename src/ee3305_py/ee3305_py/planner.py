@@ -853,12 +853,12 @@ class Planner(Node):
                 idx = self.CRToIndex_(c, r)
                 nodes[idx] = AStarNode(c, r)
 
-        # Heuristic function in meters (Euclidean)
+        # Heuristic function in meters (Octile)
         def heuristic_meters(c, r):
-            # distance from cell center to goal cell center in meters
-            dc = (goal_c - c)
-            dr = (goal_r - r)
-            return hypot(dc, dr) * self.costmap_resolution_
+            # octile distance from cell to goal cell in meters
+            dc = abs(goal_c - c)
+            dr = abs(goal_r - r)
+            return self.costmap_resolution_ * (max(dc, dr) + (sqrt(2.0) - 1.0) * min(dc, dr))
 
         # Start node initialization
         start_idx = self.CRToIndex_(start_c, start_r)
@@ -1002,4 +1002,5 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
+
 
